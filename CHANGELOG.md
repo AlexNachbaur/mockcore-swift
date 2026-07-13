@@ -18,5 +18,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `SeedSource` and YAML/JSON seed-document decoding (schema validation stays with each
     protocol extension).
   - Diagnostics: `MockError` (formerly `MockQLError`), `SourceLocation`, `Suggestion`.
-- `MockCoreTransport` target placeholder; `MockHost` and the `MockService` extension seam land
-  in Phase 2 of the extraction plan.
+- `MockCoreTransport`: the platform's shared SwiftNIO listener and extension seam, generalized
+  from MockQL's transport:
+  - `MockHost` — one port, many protocols: binds localhost, runs fail-fast `willStart()`
+    validation, and routes each request to the first registered service that claims it.
+    Unclaimed requests get a diagnostic 404 naming the registered services; `GET /health`
+    answers `ok` when unclaimed.
+  - `MockService` — the extension seam: `claims(_:)`/`respond(to:)` plus optional
+    `webSocketUpgrade(for:)` (used by GraphQL subscriptions), `willStart()`, and `shutdown()`.
+  - `MockRequest`/`MockResponse` — the neutral request/response pair, with query/header
+    conveniences and JSON/text response builders.
