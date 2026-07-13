@@ -1,0 +1,27 @@
+# MockCore
+
+> Shared foundation for a family of native-Swift mock servers used in UI-test automation. One
+> `MockHost` binds one localhost port and routes to any number of registered `MockService`s
+> (GraphQL via MockQL, REST via MockREST, or your own), which share one transactional
+> in-memory `StateStore` and one deterministic data-generation system.
+
+Swift 6.1+, SPM package with two libraries: `MockCore` (portable, NIO-free: MockValue,
+StateStore, generators, seed primitives, diagnostics) and `MockCoreTransport` (SwiftNIO
+MockHost + MockService seam). Test-time tool only. Most apps should depend on a protocol
+extension, not on this package directly.
+
+## Protocol extensions
+
+- [MockQL](https://github.com/AlexNachbaur/mockql-swift): GraphQL (queries, mutations, graphql-transport-ws subscriptions)
+- [MockREST](https://github.com/AlexNachbaur/mockrest-swift): REST / OpenAPI 3.0-3.1
+
+## Reference
+
+- [README](https://raw.githubusercontent.com/AlexNachbaur/mockcore-swift/main/README.md): overview, composition example, writing your own extension
+- [Platform architecture](https://raw.githubusercontent.com/AlexNachbaur/mockrest-swift/main/docs/design/architecture.md): module topology, the MockService seam, settled design decisions
+- [API documentation](https://swiftpackageindex.com/AlexNachbaur/mockcore-swift/documentation): DocC for both modules
+
+## Contributing
+
+- [AGENTS.md](https://raw.githubusercontent.com/AlexNachbaur/mockcore-swift/main/AGENTS.md): instructions for agents working in this repository
+- [CONTRIBUTING](https://raw.githubusercontent.com/AlexNachbaur/mockcore-swift/main/CONTRIBUTING.md): style rules, the protocol-neutrality test, and PR process
