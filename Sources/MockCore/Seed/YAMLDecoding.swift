@@ -1,17 +1,30 @@
 import Yams
 
 /// Converts YAML text into a `MockValue` tree using YAML core-schema scalar resolution.
-struct YAMLDecoding {
+///
+/// Used for seed documents and by protocol extensions for their own YAML inputs (e.g. MockREST
+/// decodes OpenAPI specs through it), so all YAML diagnostics behave identically.
+public struct YAMLDecoding {
     /// Decodes a YAML document. Quoted scalars stay strings; plain scalars resolve to
-    /// null/bool/int/float where they match, matching what seed authors expect from YAML.
-    static func decode(_ text: String, sourceName: String?) throws -> MockValue {
+    /// null/bool/int/float where they match, matching what YAML authors expect.
+    ///
+    /// - Parameters:
+    ///   - text: The YAML text.
+    ///   - sourceName: The name reported in diagnostics (usually a file path).
+    ///   - category: The error category thrown for malformed documents; `.seed` by default.
+    public static func decode(
+        _ text: String,
+        sourceName: String?,
+        category: MockError.Category = .seed
+    ) throws -> MockValue {
         let root: Node?
         do {
             root = try Yams.compose(yaml: text)
         } catch let error as YamlError {
+            let kind = category == .seed ? "Seed document" : "Document"
             throw MockError(
-                category: .seed,
-                message: "Seed document is not valid YAML: \(error)",
+                category: category,
+                message: "\(kind) is not valid YAML: \(error)",
                 sourceName: sourceName
             )
         }

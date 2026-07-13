@@ -71,6 +71,13 @@ public struct MutationState: Sendable {
         data.order[type] ?? []
     }
 
+    /// An immutable copy of the state this transaction sees — the pre-mutation snapshot plus
+    /// its own uncommitted writes. Useful for serializers that resolve references while a
+    /// handler is still running.
+    public var storeData: StoreData {
+        data
+    }
+
     /// Reads a root field binding. Missing roots read as `.null`.
     public func root(_ field: String) -> MockValue {
         data.roots[field] ?? .null

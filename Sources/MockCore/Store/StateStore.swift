@@ -15,6 +15,25 @@ public actor StateStore {
         self.data = data
     }
 
+    /// Merges seed data into the existing contents — how a second protocol extension loads its
+    /// seed into a store it shares with a sibling. Incoming records win on id collisions;
+    /// insertion order of existing records is preserved.
+    public func merge(_ incoming: StoreData) {
+        for (type, records) in incoming.records {
+            for id in incoming.order[type] ?? [] {
+                guard let record = records[id] else { continue }
+                if data.records[type]?[id] == nil {
+                    data.order[type, default: []].append(id)
+                }
+                data.records[type, default: [:]][id] = record
+            }
+        }
+        for (field, value) in incoming.roots {
+            data.roots[field] = value
+        }
+        data.autoIDCounter = max(data.autoIDCounter, incoming.autoIDCounter)
+    }
+
     /// An immutable snapshot of the current state for query execution.
     public func snapshot() -> StoreData {
         data

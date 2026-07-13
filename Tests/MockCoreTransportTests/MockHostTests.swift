@@ -63,7 +63,6 @@ private struct MisconfiguredService: MockService {
             EchoService(name: "Alpha", prefix: "/alpha", store: store)
             EchoService(name: "Wide", prefix: "/", store: store)
         }
-        defer { Task { try await host.stop() } }
 
         let alpha = try await get(#require(URL(string: "/alpha/x", relativeTo: host.url)))
         #expect(alpha.status == 200)
@@ -73,6 +72,7 @@ private struct MisconfiguredService: MockService {
         let other = try await get(#require(URL(string: "/anything", relativeTo: host.url)))
         let otherBody = try MockValue.fromJSONData(other.body)
         #expect(otherBody["service"] == .string("Wide"))
+        try await host.stop()
     }
 
     @Test func servicesShareOneStateStore() async throws {
@@ -81,20 +81,19 @@ private struct MisconfiguredService: MockService {
             EchoService(name: "Alpha", prefix: "/alpha", store: store)
             EchoService(name: "Beta", prefix: "/beta", store: store)
         }
-        defer { Task { try await host.stop() } }
 
         _ = try await get(#require(URL(string: "/alpha/one", relativeTo: host.url)))
         let second = try await get(#require(URL(string: "/beta/two", relativeTo: host.url)))
         let body = try MockValue.fromJSONData(second.body)
         // Beta sees the record Alpha's request inserted: one shared backend, two services.
         #expect(body["requestCount"] == .int(2))
+        try await host.stop()
     }
 
     @Test func unclaimedRequestsGetADiagnostic404() async throws {
         let host = try await MockHost.start {
             EchoService(name: "Alpha", prefix: "/alpha", store: StateStore())
         }
-        defer { Task { try await host.stop() } }
 
         let missing = try await get(#require(URL(string: "/nope", relativeTo: host.url)))
         #expect(missing.status == 404)
@@ -102,17 +101,18 @@ private struct MisconfiguredService: MockService {
         let message = try #require(body["error"].stringValue)
         #expect(message.contains("GET /nope"))
         #expect(message.contains("Alpha"))
+        try await host.stop()
     }
 
     @Test func healthEndpointAnswersWhenNoServiceClaimsIt() async throws {
         let host = try await MockHost.start {
             EchoService(name: "Alpha", prefix: "/alpha", store: StateStore())
         }
-        defer { Task { try await host.stop() } }
 
         let health = try await get(#require(URL(string: "/health", relativeTo: host.url)))
         #expect(health.status == 200)
         #expect(String(decoding: health.body, as: UTF8.self) == "ok")
+        try await host.stop()
     }
 
     @Test func failingWillStartPreventsBinding() async {
