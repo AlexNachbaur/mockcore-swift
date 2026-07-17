@@ -92,7 +92,8 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
         for (name, value) in mockResponse.headers {
             headers.add(name: name, value: value)
         }
-        let bodyForbidden = mockResponse.status == 204 || mockResponse.status == 304
+        let bodyForbidden =
+            mockResponse.status == 204 || mockResponse.status == 304
             || (100..<200).contains(mockResponse.status)
         if !bodyForbidden {
             // HEAD keeps the Content-Length the corresponding GET would have had.
