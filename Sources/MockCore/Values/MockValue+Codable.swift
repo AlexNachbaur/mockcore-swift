@@ -55,6 +55,11 @@ extension MockValue: Codable {
 
 extension MockValue {
     /// Decodes a `MockValue` tree from JSON data.
+    ///
+    /// > Note: JSON numbers are decoded as `.int` when they convert losslessly, so an integral
+    /// > float like `3.0` may decode as `.int(3)` (the exact boundary is a Foundation detail
+    /// > and can differ between platforms). Write `3.01`-style values — or seed via Swift
+    /// > literals — when the distinction matters.
     public static func fromJSONData(_ data: Data) throws -> MockValue {
         try JSONDecoder().decode(MockValue.self, from: data)
     }

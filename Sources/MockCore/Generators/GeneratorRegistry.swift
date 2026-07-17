@@ -111,11 +111,16 @@ public struct GeneratorRegistry: Sendable {
             if lowered.contains("description") || lowered.contains("summary") || lowered.contains("bio") {
                 return .sentence
             }
-            if lowered.contains("date") || lowered.contains("time") || lowered.hasSuffix("at") { return .dateTime }
+            if lowered.contains("date") || lowered.contains("time") || fieldName.hasSuffix("At")
+                || lowered.hasSuffix("_at")
+            {
+                return .dateTime
+            }
             return .sentence
         default:
             // Custom scalars: date-like names get timestamps; anything else gets an opaque string.
-            if lowered.contains("date") || lowered.contains("time") || lowered.hasSuffix("at")
+            if lowered.contains("date") || lowered.contains("time") || fieldName.hasSuffix("At")
+                || lowered.hasSuffix("_at")
                 || scalarTypeName.lowercased().contains("date") || scalarTypeName.lowercased().contains("time")
             {
                 return .dateTime

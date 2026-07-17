@@ -20,12 +20,22 @@ public actor StateStore {
     /// insertion order of existing records is preserved.
     public func merge(_ incoming: StoreData) {
         for (type, records) in incoming.records {
+            var merged: Set<String> = []
             for id in incoming.order[type] ?? [] {
                 guard let record = records[id] else { continue }
                 if data.records[type]?[id] == nil {
                     data.order[type, default: []].append(id)
                 }
                 data.records[type, default: [:]][id] = record
+                merged.insert(id)
+            }
+            // Records a caller stored without an `order` entry still merge (sorted for
+            // determinism) rather than silently vanishing.
+            for id in records.keys.sorted() where !merged.contains(id) {
+                if data.records[type]?[id] == nil {
+                    data.order[type, default: []].append(id)
+                }
+                data.records[type, default: [:]][id] = records[id]
             }
         }
         for (field, value) in incoming.roots {

@@ -27,14 +27,16 @@ public struct StoreData: Sendable, Hashable {
         (order[type] ?? []).compactMap { records[type]?[$0] }
     }
 
-    /// Inserts a record, generating an id when the fields don't carry one.
+    /// Inserts a record, generating an id when the fields don't carry one. Integer ids coerce
+    /// to strings, matching ``MockValue/reference(_:id:)-swift.type.method``.
     /// - Returns: The record's id.
     @discardableResult
     public mutating func insert(type: String, fields: [String: MockValue]) -> String {
         var fields = fields
         let id: String
-        if let provided = fields["id"]?.stringValue {
+        if let provided = fields["id"]?.stringValue ?? fields["id"]?.intValue.map(String.init) {
             id = provided
+            fields["id"] = .string(provided)
         } else {
             autoIDCounter += 1
             id = "\(type.lowercased())-auto-\(autoIDCounter)"

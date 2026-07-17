@@ -79,6 +79,23 @@ public final class MockHost: Sendable {
         try await start(host: host, port: port, services: services())
     }
 
+    /// Starts a host whose services are themselves created asynchronously — so engines can be
+    /// constructed right inside the block:
+    ///
+    /// ```swift
+    /// let host = try await MockHost.start {
+    ///     try await MockRESTEngine(spec: .file("api.yaml"), store: store)
+    ///     try await MockQLEngine(schema: .file("shop.graphqls"), store: store)
+    /// }
+    /// ```
+    public static func start(
+        host: String = "127.0.0.1",
+        port: Int = 0,
+        @MockServiceBuilder services: () async throws -> [any MockService]
+    ) async throws -> MockHost {
+        try await start(host: host, port: port, services: try await services())
+    }
+
     /// Starts a host serving the given services on localhost.
     public static func start(host: String = "127.0.0.1", port: Int = 0, services: [any MockService]) async throws
         -> MockHost
@@ -86,8 +103,19 @@ public final class MockHost: Sendable {
         guard !services.isEmpty else {
             throw MockError(category: .configuration, message: "A MockHost needs at least one registered service")
         }
-        for service in services {
-            try await service.willStart()
+        // Run startup validation in registration order; if any service refuses to start, shut
+        // down the ones that already did so nothing leaks resources.
+        var started: [any MockService] = []
+        do {
+            for service in services {
+                try await service.willStart()
+                started.append(service)
+            }
+        } catch {
+            for service in started {
+                await service.shutdown()
+            }
+            throw error
         }
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let upgrader = NIOWebSocketServerUpgrader(
@@ -99,8 +127,11 @@ public final class MockHost: Sendable {
                 }
                 var headers = HTTPHeaders()
                 if let subprotocol = upgrade.subprotocol {
+                    // RFC 6455 §4.2.2: the server may only select a subprotocol the client
+                    // offered, compared as whole tokens — substring matching would echo a
+                    // protocol the client never sent and compliant clients abort the handshake.
                     let requested = head.headers[canonicalForm: "Sec-WebSocket-Protocol"]
-                    if requested.contains(where: { $0.lowercased().contains(subprotocol.lowercased()) }) {
+                    if requested.contains(where: { String($0).caseInsensitiveCompare(subprotocol) == .orderedSame }) {
                         headers.add(name: "Sec-WebSocket-Protocol", value: subprotocol)
                     }
                 }
@@ -141,6 +172,9 @@ public final class MockHost: Sendable {
             }
             return try MockHost(services: services, channel: channel, group: group, port: boundPort, host: host)
         } catch {
+            for service in services {
+                await service.shutdown()
+            }
             try? await group.shutdownGracefully()
             throw error
         }

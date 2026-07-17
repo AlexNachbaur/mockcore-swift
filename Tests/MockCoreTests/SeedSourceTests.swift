@@ -66,6 +66,17 @@ import Testing
         }
     }
 
+    @Test func yamlAnchorsAndAliasesResolve() throws {
+        let document = try SeedSource.yaml(
+            """
+            first: &price 100
+            second: *price
+            """
+        ).rawDocument()
+        #expect(document["first"] == .int(100))
+        #expect(document["second"] == .int(100))
+    }
+
     @Test func documentSourcePassesThroughUnchanged() throws {
         let value: MockValue = ["version": 1, "data": ["User": [["id": "u1"]]]]
         let document = try SeedSource.document(value).rawDocument()

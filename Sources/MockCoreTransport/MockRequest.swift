@@ -21,7 +21,7 @@ public struct MockRequest: Sendable {
     public init(method: String, uri: String, headers: [(name: String, value: String)] = [], body: Data = Data()) {
         self.method = method.uppercased()
         self.uri = uri
-        self.path = uri.split(separator: "?", maxSplits: 1).first.map(String.init) ?? uri
+        self.path = String(uri.prefix(while: { $0 != "?" }))
         self.headers = headers
         self.body = body
     }
@@ -32,11 +32,19 @@ public struct MockRequest: Sendable {
     }
 
     /// The decoded query parameters, in wire order. Parameters without a value decode as `""`.
+    ///
+    /// Each name and value is percent-decoded independently (an undecodable component is passed
+    /// through raw), so one malformed parameter never disables decoding for the others — unlike
+    /// whole-URI parsers, whose strictness also varies across Foundation versions.
     public var queryItems: [(name: String, value: String)] {
-        guard let components = URLComponents(string: uri), let items = components.queryItems else {
-            return []
+        guard let queryStart = uri.firstIndex(of: "?") else { return [] }
+        let query = uri[uri.index(after: queryStart)...]
+        return query.split(separator: "&").map { pair in
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let rawName = String(parts.first ?? "")
+            let rawValue = parts.count > 1 ? String(parts[1]) : ""
+            return (rawName.removingPercentEncoding ?? rawName, rawValue.removingPercentEncoding ?? rawValue)
         }
-        return items.map { ($0.name, $0.value ?? "") }
     }
 
     /// The first value of the named query parameter, or `nil`.

@@ -52,6 +52,26 @@ import Testing
         #expect(await store.records(ofType: "User").count == 2)
     }
 
+    @Test func mergeKeepsRecordsMissingFromTheOrderIndex() async {
+        let store = StateStore()
+        var incoming = StoreData()
+        // A caller can legally populate `records` without an `order` entry; merge must not
+        // silently drop such records.
+        incoming.records["User"] = ["u1": .object(["id": .string("u1"), "name": .string("Avery")])]
+        await store.merge(incoming)
+        #expect(await store.record(type: "User", id: "u1")?["name"] == .string("Avery"))
+        #expect(await store.records(ofType: "User").count == 1)
+    }
+
+    @Test func insertCoercesIntegerIdsToStrings() async {
+        let store = StateStore()
+        await store.withMutationState { state in
+            state.insert("User", ["id": 42, "name": "Avery"])
+        }
+        let record = await store.record(type: "User", id: "42")
+        #expect(record?["id"] == .string("42"))
+    }
+
     @Test func storeDataExposesUncommittedWritesToTheTransaction() async {
         let store = StateStore()
         await store.withMutationState { state in

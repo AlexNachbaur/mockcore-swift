@@ -43,10 +43,15 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
     private struct ResponseContext: Sendable {
         let version: HTTPVersion
         let keepAlive: Bool
+        let isHEAD: Bool
     }
 
     private func route(head: HTTPRequestHead, body: ByteBuffer?, channel: Channel) {
-        let responseContext = ResponseContext(version: head.version, keepAlive: head.isKeepAlive)
+        let responseContext = ResponseContext(
+            version: head.version,
+            keepAlive: head.isKeepAlive,
+            isHEAD: head.method == .HEAD
+        )
         let request = MockRequest(
             method: head.method.rawValue,
             uri: head.uri,
@@ -79,21 +84,31 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
     }
 
     /// Writes a complete response. Safe to call from any thread; NIO serializes channel writes.
+    ///
+    /// Statuses that forbid a message body (1xx/204/304) and HEAD responses write headers only —
+    /// stray body bytes would desynchronize a keep-alive connection.
     private static func send(_ mockResponse: MockResponse, response: ResponseContext, channel: Channel) {
         var headers = HTTPHeaders()
         for (name, value) in mockResponse.headers {
             headers.add(name: name, value: value)
         }
-        headers.replaceOrAdd(name: "Content-Length", value: String(mockResponse.body.count))
+        let bodyForbidden = mockResponse.status == 204 || mockResponse.status == 304
+            || (100..<200).contains(mockResponse.status)
+        if !bodyForbidden {
+            // HEAD keeps the Content-Length the corresponding GET would have had.
+            headers.replaceOrAdd(name: "Content-Length", value: String(mockResponse.body.count))
+        }
         if !response.keepAlive {
             headers.add(name: "Connection", value: "close")
         }
         let status = HTTPResponseStatus(statusCode: mockResponse.status)
         let responseHead = HTTPResponseHead(version: response.version, status: status, headers: headers)
-        var buffer = channel.allocator.buffer(capacity: mockResponse.body.count)
-        buffer.writeBytes(mockResponse.body)
         channel.write(HTTPServerResponsePart.head(responseHead), promise: nil)
-        channel.write(HTTPServerResponsePart.body(.byteBuffer(buffer)), promise: nil)
+        if !bodyForbidden, !response.isHEAD {
+            var buffer = channel.allocator.buffer(capacity: mockResponse.body.count)
+            buffer.writeBytes(mockResponse.body)
+            channel.write(HTTPServerResponsePart.body(.byteBuffer(buffer)), promise: nil)
+        }
         let promise: EventLoopPromise<Void>? = response.keepAlive ? nil : channel.eventLoop.makePromise()
         if let promise {
             promise.futureResult.whenComplete { _ in

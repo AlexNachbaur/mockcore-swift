@@ -1,6 +1,8 @@
 import Yams
 
-/// Converts YAML text into a `MockValue` tree using YAML core-schema scalar resolution.
+/// Converts YAML text into a `MockValue` tree using core-schema-style scalar resolution
+/// (null/bool/int and unambiguous decimal floats resolve; exotic spellings like hex, octal,
+/// and `.inf` stay strings). Anchors and aliases are resolved during composition.
 ///
 /// Used for seed documents and by protocol extensions for their own YAML inputs (e.g. MockREST
 /// decodes OpenAPI specs through it), so all YAML diagnostics behave identically.
@@ -56,7 +58,7 @@ public struct YAMLDecoding {
         default:
             throw MockError(
                 category: .seed,
-                message: "Unsupported YAML construct in seed document (anchors/aliases are not supported)",
+                message: "Unsupported YAML construct in seed document",
                 sourceName: sourceName
             )
         }
