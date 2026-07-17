@@ -45,6 +45,9 @@ private struct TeapotService: MockService {
     }
 }
 
+// The WebSocket handshake tests below are Darwin-only: URLSession WebSocket tasks are
+// unavailable on Linux (libcurl backend). Matches mockql's integration-suite convention.
+
 /// A WebSocket echo service negotiating the `wsproto` subprotocol.
 private struct WSEchoService: MockService {
     let name = "WSEcho"
@@ -132,44 +135,46 @@ private final class TextEchoHandler: ChannelInboundHandler, @unchecked Sendable 
         try await host.stop()
     }
 
-    @Test func webSocketUpgradeEchoesAnExactlyOfferedSubprotocol() async throws {
-        let host = try await MockHost.start { WSEchoService() }
-        let url = try #require(URL(string: "/ws", relativeTo: host.webSocketURL)).absoluteURL
-        let task = URLSession.shared.webSocketTask(with: url, protocols: ["wsproto"])
-        task.resume()
-        try await task.send(.string("hello"))
-        let reply = try await task.receive()
-        if case .string(let text) = reply {
-            #expect(text == "hello")
-        } else {
-            Issue.record("Expected a text echo, got \(reply)")
+    #if canImport(Darwin)
+        @Test func webSocketUpgradeEchoesAnExactlyOfferedSubprotocol() async throws {
+            let host = try await MockHost.start { WSEchoService() }
+            let url = try #require(URL(string: "/ws", relativeTo: host.webSocketURL)).absoluteURL
+            let task = URLSession.shared.webSocketTask(with: url, protocols: ["wsproto"])
+            task.resume()
+            try await task.send(.string("hello"))
+            let reply = try await task.receive()
+            if case .string(let text) = reply {
+                #expect(text == "hello")
+            } else {
+                Issue.record("Expected a text echo, got \(reply)")
+            }
+            let http = task.response as? HTTPURLResponse
+            #expect(http?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol") == "wsproto")
+            task.cancel(with: .normalClosure, reason: nil)
+            try await host.stop()
         }
-        let http = task.response as? HTTPURLResponse
-        #expect(http?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol") == "wsproto")
-        task.cancel(with: .normalClosure, reason: nil)
-        try await host.stop()
-    }
 
-    @Test func subprotocolMatchingComparesWholeTokensNotSubstrings() async throws {
-        let host = try await MockHost.start { WSEchoService() }
-        let url = try #require(URL(string: "/ws", relativeTo: host.webSocketURL)).absoluteURL
-        // "zz-wsproto-zz" contains "wsproto" as a substring; per RFC 6455 the server must NOT
-        // select a protocol the client never offered — a substring match here would make
-        // URLSession abort the handshake.
-        let task = URLSession.shared.webSocketTask(with: url, protocols: ["zz-wsproto-zz"])
-        task.resume()
-        try await task.send(.string("ping"))
-        let reply = try await task.receive()
-        if case .string(let text) = reply {
-            #expect(text == "ping")
-        } else {
-            Issue.record("Expected a text echo, got \(reply)")
+        @Test func subprotocolMatchingComparesWholeTokensNotSubstrings() async throws {
+            let host = try await MockHost.start { WSEchoService() }
+            let url = try #require(URL(string: "/ws", relativeTo: host.webSocketURL)).absoluteURL
+            // "zz-wsproto-zz" contains "wsproto" as a substring; per RFC 6455 the server must NOT
+            // select a protocol the client never offered — a substring match here would make
+            // URLSession abort the handshake.
+            let task = URLSession.shared.webSocketTask(with: url, protocols: ["zz-wsproto-zz"])
+            task.resume()
+            try await task.send(.string("ping"))
+            let reply = try await task.receive()
+            if case .string(let text) = reply {
+                #expect(text == "ping")
+            } else {
+                Issue.record("Expected a text echo, got \(reply)")
+            }
+            let http = task.response as? HTTPURLResponse
+            #expect(http?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol") == nil)
+            task.cancel(with: .normalClosure, reason: nil)
+            try await host.stop()
         }
-        let http = task.response as? HTTPURLResponse
-        #expect(http?.value(forHTTPHeaderField: "Sec-WebSocket-Protocol") == nil)
-        task.cancel(with: .normalClosure, reason: nil)
-        try await host.stop()
-    }
+    #endif
 
     @Test func queryDecodingIsUniformPerParameter() {
         let request = MockRequest(method: "GET", uri: "/x?a=hello%20world&b=1%&c=&d")
