@@ -1,8 +1,8 @@
 # MockCore
 
 [![Build](https://github.com/AlexNachbaur/mockcore-swift/actions/workflows/build.yml/badge.svg)](https://github.com/AlexNachbaur/mockcore-swift/actions/workflows/build.yml)
-[![Swift 6.1](https://img.shields.io/badge/Swift-6.1-orange.svg)](https://swift.org)
-[![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20iOS%20%7C%20Linux%20%7C%20Android-blue.svg)](#requirements)
+[![Swift 6.3](https://img.shields.io/badge/Swift-6.3-orange.svg)](https://swift.org)
+[![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20iOS%20%7C%20Linux%20%7C%20Windows%20%7C%20Android-blue.svg)](#requirements)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
 The shared foundation of a family of native-Swift mock servers for local UI-test automation.
@@ -115,10 +115,12 @@ targets: [
 
 ## Requirements
 
-- **Swift 6.1+** (strict concurrency).
+- **Swift 6.3+** (strict concurrency).
 - Apple platforms: macOS 14+ / iOS 17+ (minimums exist only for Swift concurrency APIs).
-- Linux and Android are fully supported and exercised in CI; `MockCore` itself has no
-  networking dependency and also builds where SwiftNIO isn't available (e.g. Windows).
+- macOS, iOS, Linux, Windows, and Android are all supported, and CI builds and tests both
+  products on every one of them.
+- `MockCore` itself has no networking dependency, so it is also usable in-process on any host
+  that cannot or does not want to run a listener.
 - Dependencies: [Yams](https://github.com/jpsim/Yams) (`MockCore`),
   [SwiftNIO](https://github.com/apple/swift-nio) (`MockCoreTransport`).
 
