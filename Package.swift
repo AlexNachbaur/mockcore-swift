@@ -18,7 +18,7 @@ let package = Package(
         .library(name: "MockCoreTransport", targets: ["MockCoreTransport"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.2"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.70.0"),
         // Build-time only: enables `swift package generate-documentation` for the DocC catalogs.
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
