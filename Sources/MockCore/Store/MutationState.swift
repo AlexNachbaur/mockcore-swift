@@ -27,6 +27,9 @@ public struct MutationState: Sendable {
     }
 
     /// Reads or replaces a whole record. Reading a missing record returns `.null`.
+    ///
+    /// Assigning anything other than an object — including `.null` — is ignored; use
+    /// ``delete(_:id:)`` to remove a record.
     public subscript(type: String, id id: String) -> MockValue {
         get {
             data.record(type: type, id: id) ?? .null
@@ -48,7 +51,10 @@ public struct MutationState: Sendable {
         self[type, id: id] = record
     }
 
-    /// Inserts a new record and returns it (including its — possibly generated — id).
+    /// Inserts a record and returns it (including its — possibly generated — id).
+    ///
+    /// Inserting under an id that already exists replaces that record; see
+    /// ``StoreData/insert(type:fields:)`` for the id rules.
     @discardableResult
     public mutating func insert(_ type: String, _ fields: MockValue) -> MockValue {
         let id = data.insert(type: type, fields: fields.objectValue ?? [:])

@@ -89,8 +89,13 @@ public struct GeneratorRegistry: Sendable {
 
     /// The generator used when no explicit binding exists: inferred from the field name where
     /// the name strongly implies a shape, otherwise a sensible default for the scalar type.
+    ///
+    /// Names are matched by **word**, not by substring: `fieldName` is split at camelCase
+    /// humps, underscores, hyphens, and digits, and a rule fires only when one of its words is
+    /// present. Substring matching reads `updated` as a date, `hourly` as a URL, and `filename`
+    /// as a person — a wrong guess that looks deliberate in a rendered UI.
     public static func inferred(fieldName: String, scalarTypeName: String) -> FieldGenerator {
-        let lowered = fieldName.lowercased()
+        let name = FieldNameWords(fieldName)
         switch scalarTypeName {
         case "ID":
             return .uuid
@@ -101,28 +106,18 @@ public struct GeneratorRegistry: Sendable {
         case "Boolean":
             return .bool
         case "String":
-            if lowered.contains("email") { return .email }
-            if lowered.contains("phone") { return .phoneNumber }
-            if lowered.contains("url") || lowered.contains("website") || lowered.contains("link") { return .url }
-            if lowered.contains("username") || lowered.contains("handle") { return .username }
-            if lowered.contains("firstname") { return .firstName }
-            if lowered.contains("lastname") || lowered.contains("surname") { return .lastName }
-            if lowered.contains("name") || lowered.contains("title") { return .fullName }
-            if lowered.contains("description") || lowered.contains("summary") || lowered.contains("bio") {
-                return .sentence
-            }
-            if lowered.contains("date") || lowered.contains("time") || fieldName.hasSuffix("At")
-                || lowered.hasSuffix("_at")
-            {
-                return .dateTime
-            }
+            if name.containsAny(of: ["email"]) { return .email }
+            if name.containsAny(of: ["phone", "telephone", "mobile"]) { return .phoneNumber }
+            if name.containsAny(of: ["url", "uri", "website", "link"]) { return .url }
+            if name.containsAny(of: ["username", "handle"]) { return .username }
+            if name.containsAny(of: ["firstname", "givenname"]) { return .firstName }
+            if name.containsAny(of: ["lastname", "surname", "familyname"]) { return .lastName }
+            if name.containsAny(of: ["name"]) { return .fullName }
+            if name.isDateLike { return .dateTime }
             return .sentence
         default:
             // Custom scalars: date-like names get timestamps; anything else gets an opaque string.
-            if lowered.contains("date") || lowered.contains("time") || fieldName.hasSuffix("At")
-                || lowered.hasSuffix("_at")
-                || scalarTypeName.lowercased().contains("date") || scalarTypeName.lowercased().contains("time")
-            {
+            if name.isDateLike || FieldNameWords(scalarTypeName).isDateLike {
                 return .dateTime
             }
             return .custom(scalarTypeName: scalarTypeName) { context in
@@ -132,5 +127,66 @@ public struct GeneratorRegistry: Sendable {
                 return .string("\(word)-\(digits)")
             }
         }
+    }
+}
+
+/// A field (or scalar type) name split into lowercased words, for name-based inference.
+///
+/// `createdAt`, `created_at`, and `created-at` all become `["created", "at"]`; an acronym run
+/// stays together, so `avatarURL` is `["avatar", "url"]` and `HTMLBody` is `["html", "body"]`.
+struct FieldNameWords {
+    let words: [String]
+
+    init(_ name: String) {
+        var words: [String] = []
+        var current = ""
+        let characters = Array(name)
+        for (index, character) in characters.enumerated() {
+            guard character.isLetter else {
+                // Separators and digits end a word and belong to none.
+                if !current.isEmpty {
+                    words.append(current)
+                    current = ""
+                }
+                continue
+            }
+            if character.isUppercase, let previous = current.last {
+                let nextIsLowercase = index + 1 < characters.count && characters[index + 1].isLowercase
+                // A hump starts a word (`created|At`), and so does the last capital of an
+                // acronym run when a lowercase letter follows it (`HTML|Body`).
+                if previous.isLowercase || (previous.isUppercase && nextIsLowercase) {
+                    words.append(current)
+                    current = ""
+                }
+            }
+            current.append(character)
+        }
+        if !current.isEmpty {
+            words.append(current)
+        }
+        self.words = words.map { $0.lowercased() }
+    }
+
+    /// Whether any of `terms` appears as a word, or as adjacent words that spell it — so
+    /// `"username"` matches both `username` and `userName`, but `"name"` does not match
+    /// `filename`.
+    func containsAny(of terms: [String]) -> Bool {
+        terms.contains { term in
+            for start in words.indices {
+                var joined = ""
+                for word in words[start...] {
+                    joined += word
+                    if joined == term { return true }
+                    if joined.count >= term.count { break }
+                }
+            }
+            return false
+        }
+    }
+
+    /// Whether the name reads as a point in time: it mentions a date or time word, or ends in
+    /// the `…At` / `…_at` convention (`createdAt`, `deleted_at`).
+    var isDateLike: Bool {
+        containsAny(of: ["date", "datetime", "time", "timestamp", "birthdate", "birthday"]) || words.last == "at"
     }
 }

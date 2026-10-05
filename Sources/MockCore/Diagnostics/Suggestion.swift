@@ -5,20 +5,27 @@
 public struct Suggestion {
     /// Returns the candidate closest to `input`, if any candidate is close enough to plausibly
     /// be what the author meant.
+    ///
+    /// The result does not depend on the order of `candidates`: equally close candidates are
+    /// resolved alphabetically. Callers routinely pass `Dictionary.keys`, whose order changes
+    /// from run to run, and an error message that names a different fix each time it is
+    /// printed cannot be asserted in a test or trusted in a log.
     public static func nearest(to input: String, in candidates: some Collection<String>) -> String? {
         var best: (candidate: String, distance: Int)?
         // Only suggest when the edit distance is small relative to the input length; a
         // suggestion that shares almost nothing with the input is noise, not help.
         let threshold = max(1, input.count / 3)
+        let loweredInput = input.lowercased()
         for candidate in candidates where candidate != input {
-            // Case-only mismatches are overwhelmingly likely to be the intended fix.
-            if candidate.lowercased() == input.lowercased() {
-                return candidate
+            // Case-only mismatches are overwhelmingly likely to be the intended fix, so they
+            // rank ahead of every real edit.
+            let distance =
+                candidate.lowercased() == loweredInput ? 0 : editDistance(input, candidate, limit: threshold)
+            guard distance <= threshold else { continue }
+            if let current = best, (current.distance, current.candidate) <= (distance, candidate) {
+                continue
             }
-            let distance = editDistance(input, candidate, limit: threshold)
-            if distance <= threshold, distance < (best?.distance ?? Int.max) {
-                best = (candidate, distance)
-            }
+            best = (candidate, distance)
         }
         return best?.candidate
     }

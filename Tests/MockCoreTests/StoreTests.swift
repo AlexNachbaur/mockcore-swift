@@ -122,6 +122,33 @@ import Testing
         #expect(live?["name"] == .string("Riley"))
     }
 
+    @Test func transactionReturnsTheCommittedState() async throws {
+        let store = StateStore()
+        let (id, committed) = await store.transaction { state in
+            state.insert("User", ["name": "Avery"])["id"].stringValue ?? ""
+        }
+        // The snapshot is the one the writes produced — no second round trip, so nothing can
+        // interleave between the commit and the read.
+        #expect(committed.record(type: "User", id: id)?["name"] == .string("Avery"))
+        #expect(committed == (await store.snapshot()))
+    }
+
+    @Test func transactionRollsBackWhenTheBodyThrows() async {
+        struct Rejected: Error {}
+        let store = StateStore()
+        await store.withMutationState { state in
+            _ = state.insert("User", ["id": "u1", "name": "Avery"])
+        }
+        await #expect(throws: Rejected.self) {
+            try await store.transaction { state in
+                state.update("User", id: "u1") { $0["name"] = "Riley" }
+                throw Rejected()
+            }
+        }
+        let live = await store.record(type: "User", id: "u1")
+        #expect(live?["name"] == .string("Avery"))
+    }
+
     @Test func resetClearsEverything() async {
         let store = StateStore()
         await store.withMutationState { state in

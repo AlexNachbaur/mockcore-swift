@@ -1,3 +1,5 @@
+import Foundation
+
 /// An error produced while loading or validating user-supplied input (a schema document, an
 /// operation, or a seed document) before the server starts serving.
 ///
@@ -54,5 +56,16 @@ public struct MockError: Error, Hashable, Sendable, CustomStringConvertible {
             suffix += " (at \(documentPath))"
         }
         return prefix.isEmpty ? suffix : "\(prefix): \(suffix)"
+    }
+}
+
+extension MockError: LocalizedError {
+    /// The same text as ``description``.
+    ///
+    /// Without this, `error.localizedDescription` — what XCTest failure messages, `NSError`
+    /// bridging, and most logging helpers print — falls back to Foundation's generic "The
+    /// operation couldn't be completed", discarding the location and suggestion entirely.
+    public var errorDescription: String? {
+        description
     }
 }

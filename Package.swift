@@ -35,6 +35,7 @@ let package = Package(
             name: "MockCoreTransport",
             dependencies: [
                 "MockCore",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
