@@ -29,6 +29,10 @@ public struct StoreData: Sendable, Hashable {
 
     /// Inserts a record, generating an id when the fields don't carry one. Integer ids coerce
     /// to strings, matching ``MockValue/reference(_:id:)-swift.type.method``.
+    ///
+    /// Inserting under an id that already exists **replaces** that record and keeps its
+    /// position in the type's order. An `id` that is neither a string nor an integer (a
+    /// boolean, a float, a list, …) is not usable as a key and is replaced by a generated one.
     /// - Returns: The record's id.
     @discardableResult
     public mutating func insert(type: String, fields: [String: MockValue]) -> String {

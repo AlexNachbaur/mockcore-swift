@@ -79,9 +79,42 @@ public struct SeedSource: Sendable {
         } catch {
             throw MockError(
                 category: .seed,
-                message: "Seed document is not valid JSON: \(error.localizedDescription)",
+                message: "Seed document is not valid JSON: \(jsonFailureDetail(error))",
                 sourceName: sourceName
             )
         }
+    }
+
+    /// The most specific explanation available for a JSON decoding failure.
+    ///
+    /// `localizedDescription` on a `DecodingError` is Foundation's generic "The data couldn't
+    /// be read because it isn't in the correct format", which names neither the problem nor
+    /// where it is. The parser's own account — on Apple platforms, "Unexpected character '}'
+    /// around line 3, column 1." — travels in the error's context and its underlying error, so
+    /// it is dug out here.
+    private static func jsonFailureDetail(_ error: any Error) -> String {
+        guard let decodingError = error as? DecodingError else {
+            return String(describing: error)
+        }
+        let context: DecodingError.Context
+        switch decodingError {
+        case .dataCorrupted(let found):
+            context = found
+        case .typeMismatch(_, let found), .valueNotFound(_, let found), .keyNotFound(_, let found):
+            context = found
+        @unknown default:
+            return String(describing: decodingError)
+        }
+        var detail = context.debugDescription
+        if let underlying = context.underlyingError {
+            let parserDetail =
+                (underlying as NSError).userInfo[NSDebugDescriptionErrorKey] as? String
+                ?? String(describing: underlying)
+            if !parserDetail.isEmpty, !detail.contains(parserDetail) {
+                detail = detail.hasSuffix(".") ? "\(detail) \(parserDetail)" : "\(detail): \(parserDetail)"
+            }
+        }
+        let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+        return path.isEmpty ? detail : "\(detail) (at \(path))"
     }
 }

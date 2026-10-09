@@ -43,6 +43,12 @@ app.launchEnvironment["API_BASE_URL"] = host.url.absoluteString   // one URL, bo
 The host asks registered services `claims(_:)` in registration order and routes each request to
 the first match; unclaimed requests get a diagnostic 404 that names the registered services.
 
+The block is an ordinary result builder — `if`, `switch`, and `for` work — and it runs on the
+caller's actor, so it can be written inside a `@MainActor` test class. `host.stop()` closes the
+listener, lets in-flight requests finish, then shuts the services down; it is safe to call
+more than once. When a host lives for a single scope, `MockHost.withRunning(services:) { host
+in … }` stops it on every exit path, including a thrown test failure.
+
 ## Modules
 
 - **`MockCore`** — pure portable Swift (no networking):

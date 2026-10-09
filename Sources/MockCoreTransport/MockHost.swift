@@ -1,5 +1,6 @@
 import Foundation
 import MockCore
+import NIOConcurrencyHelpers
 import NIOCore
 import NIOHTTP1
 import NIOPosix
@@ -14,11 +15,15 @@ import NIOWebSocket
 ///
 /// ```swift
 /// let host = try await MockHost.start {
-///     MockREST(spec: .file("api.yaml"))
-///     MockGraphQL(schema: .file("shop.graphqls"))
+///     try await MockRESTEngine(spec: .file("api.yaml"), store: store)
+///     try await MockQLEngine(schema: .file("shop.graphqls"), store: store)
 /// }
 /// app.launchEnvironment["API_BASE_URL"] = host.url.absoluteString
 /// ```
+///
+/// A host owns a listening socket and an event-loop thread until ``stop(gracePeriod:)`` is
+/// called. Where the host's lifetime is one lexical scope, prefer
+/// ``withRunning(host:port:services:isolation:_:)``, which stops it on every exit path.
 public final class MockHost: Sendable {
     /// The HTTP base endpoint (`http://127.0.0.1:<port>/`). Services define paths beneath it.
     public let url: URL
@@ -31,32 +36,37 @@ public final class MockHost: Sendable {
 
     private let channel: Channel
     private let group: MultiThreadedEventLoopGroup
+    private let tracker: RequestTracker
+    /// The one shutdown every `stop` call shares; `nil` while the host is running.
+    private let shutdown = NIOLockedValueBox<Task<Void, any Error>?>(nil)
 
     private init(
         services: [any MockService],
         channel: Channel,
         group: MultiThreadedEventLoopGroup,
+        tracker: RequestTracker,
         port: Int,
         host: String
     ) throws {
         self.services = services
         self.channel = channel
         self.group = group
+        self.tracker = tracker
         self.port = port
-        var components = URLComponents()
-        components.scheme = "http"
-        components.host = host
-        components.port = port
-        components.path = "/"
-        guard let httpURL = components.url else {
-            throw MockError(category: .configuration, message: "Cannot form host URL for host '\(host)'")
+        self.url = try Self.endpointURL(scheme: "http", host: host, port: port)
+        self.webSocketURL = try Self.endpointURL(scheme: "ws", host: host, port: port)
+    }
+
+    /// Forms a base endpoint URL for a bound interface.
+    ///
+    /// An IPv6 literal (`::1`) must be bracketed in a URL authority (RFC 3986 §3.2.2); the
+    /// bind address is taken unbracketed, so the brackets are added here.
+    static func endpointURL(scheme: String, host: String, port: Int) throws -> URL {
+        let authority = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        guard let url = URL(string: "\(scheme)://\(authority):\(port)/") else {
+            throw MockError(category: .configuration, message: "Cannot form \(scheme) URL for host '\(host)'")
         }
-        components.scheme = "ws"
-        guard let wsURL = components.url else {
-            throw MockError(category: .configuration, message: "Cannot form WebSocket URL for host '\(host)'")
-        }
-        self.url = httpURL
-        self.webSocketURL = wsURL
+        return url
     }
 
     /// Starts a host serving the given services on localhost.
@@ -70,10 +80,13 @@ public final class MockHost: Sendable {
     ///     should not be exposed to real networks.
     ///   - port: Port to bind; `0` picks an ephemeral free port (recommended for parallel
     ///     tests).
+    ///   - isolation: The actor the `services` block runs on; the caller's by default, so the
+    ///     block can be written inside a `@MainActor` test and capture that test's state.
     ///   - services: The services to serve, in routing precedence order.
     public static func start(
         host: String = "127.0.0.1",
         port: Int = 0,
+        isolation: isolated (any Actor)? = #isolation,
         @MockServiceBuilder services: () -> [any MockService]
     ) async throws -> MockHost {
         try await start(host: host, port: port, services: services())
@@ -88,12 +101,58 @@ public final class MockHost: Sendable {
     ///     try await MockQLEngine(schema: .file("shop.graphqls"), store: store)
     /// }
     /// ```
+    ///
+    /// The block runs on the caller's actor (`isolation` defaults to it), so it can be written
+    /// inside a `@MainActor` test and capture that test's state.
     public static func start(
         host: String = "127.0.0.1",
         port: Int = 0,
+        isolation: isolated (any Actor)? = #isolation,
         @MockServiceBuilder services: () async throws -> [any MockService]
     ) async throws -> MockHost {
         try await start(host: host, port: port, services: try await services())
+    }
+
+    /// Starts a host, runs `body` with it, and stops it on every exit path — including when
+    /// `body` throws.
+    ///
+    /// ```swift
+    /// try await MockHost.withRunning(services: [engine]) { host in
+    ///     let (data, _) = try await URLSession.shared.data(from: host.url)
+    ///     …
+    /// }
+    /// ```
+    ///
+    /// Prefer this in tests: a failed expectation that throws past a trailing `stop()` call
+    /// otherwise leaks the listening port and its event-loop thread for the rest of the
+    /// process. An error thrown by `body` takes precedence over one thrown while stopping.
+    ///
+    /// - Parameters:
+    ///   - host: Interface to bind; loopback by default.
+    ///   - port: Port to bind; `0` picks an ephemeral free port.
+    ///   - services: The services to serve, in routing precedence order.
+    ///   - isolation: The actor `body` runs on; the caller's by default.
+    ///   - body: The work to do while the host is serving.
+    /// - Returns: Whatever `body` returns.
+    public static func withRunning<Result>(
+        host: String = "127.0.0.1",
+        port: Int = 0,
+        services: [any MockService],
+        isolation: isolated (any Actor)? = #isolation,
+        _ body: (MockHost) async throws -> Result
+    ) async throws -> Result {
+        let running = try await start(host: host, port: port, services: services)
+        let result: Result
+        do {
+            result = try await body(running)
+        } catch {
+            // The body's error is the one worth reporting; a failure to stop afterwards would
+            // only mask it.
+            try? await running.stop()
+            throw error
+        }
+        try await running.stop()
+        return result
     }
 
     /// Starts a host serving the given services on localhost.
@@ -118,11 +177,14 @@ public final class MockHost: Sendable {
             throw error
         }
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let tracker = RequestTracker()
         let upgrader = NIOWebSocketServerUpgrader(
             maxFrameSize: 1 << 20,
             shouldUpgrade: { channel, head in
                 let request = MockRequest(head: head)
-                guard let upgrade = Self.webSocketUpgrade(for: request, in: services) else {
+                // Once the host is stopping, an upgrade would hand a socket to a service that is
+                // about to be shut down; declining it lets the HTTP path answer 503 instead.
+                guard tracker.isAccepting, let upgrade = Self.webSocketUpgrade(for: request, in: services) else {
                     return channel.eventLoop.makeSucceededFuture(nil)
                 }
                 var headers = HTTPHeaders()
@@ -149,7 +211,7 @@ public final class MockHost: Sendable {
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
-                let httpHandler = HostHTTPHandler(services: services)
+                let httpHandler = HostHTTPHandler(services: services, tracker: tracker)
                 return channel.pipeline.configureHTTPServerPipeline(
                     withServerUpgrade: (
                         upgraders: [upgrader],
@@ -170,7 +232,20 @@ public final class MockHost: Sendable {
                 try await group.shutdownGracefully()
                 throw MockError(category: .configuration, message: "Host bound without a local address")
             }
-            return try MockHost(services: services, channel: channel, group: group, port: boundPort, host: host)
+            do {
+                return try MockHost(
+                    services: services,
+                    channel: channel,
+                    group: group,
+                    tracker: tracker,
+                    port: boundPort,
+                    host: host
+                )
+            } catch {
+                // The port is bound but no host exists to release it.
+                try? await channel.close()
+                throw error
+            }
         } catch {
             for service in services {
                 await service.shutdown()
@@ -180,13 +255,54 @@ public final class MockHost: Sendable {
         }
     }
 
-    /// Stops accepting connections, shuts down every service, and releases the port.
-    public func stop() async throws {
+    /// Stops accepting connections, lets in-flight requests finish, shuts down every service,
+    /// and releases the port.
+    ///
+    /// The order is what makes shutdown clean for the client: the listener closes first, so no
+    /// request can reach a service after its ``MockService/shutdown()``; requests already being
+    /// handled are then given `gracePeriod` to answer before they are cancelled.
+    ///
+    /// Safe to call more than once and from several tasks: every call awaits the same shutdown
+    /// and reports the same outcome — including a call made from inside a request handler,
+    /// which is abandoned by the drain rather than awaited (see below) and resumes once the
+    /// host has stopped.
+    ///
+    /// - Parameter gracePeriod: How long in-flight requests may keep running before they are
+    ///   cancelled, and then how long a cancelled request may take to wind down before it is
+    ///   abandoned. `stop` therefore takes at most twice this on a misbehaving handler.
+    public func stop(gracePeriod: Duration = .seconds(2)) async throws {
+        let task = shutdown.withLockedValue { existing in
+            if let existing {
+                return existing
+            }
+            let task = Task { try await self.performStop(gracePeriod: gracePeriod) }
+            existing = task
+            return task
+        }
+        try await task.value
+    }
+
+    private func performStop(gracePeriod: Duration) async throws {
+        tracker.stopAccepting()
+        var failure: (any Error)?
+        do {
+            try await channel.close()
+        } catch {
+            failure = error
+        }
+        await tracker.drain(gracePeriod: gracePeriod)
         for service in services {
             await service.shutdown()
         }
-        try await channel.close()
-        try await group.shutdownGracefully()
+        // Always reached, so a listener that failed to close cannot also leak the event loop.
+        do {
+            try await group.shutdownGracefully()
+        } catch {
+            failure = failure ?? error
+        }
+        if let failure {
+            throw failure
+        }
     }
 
     private static func webSocketUpgrade(

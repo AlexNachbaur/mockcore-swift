@@ -190,4 +190,15 @@ private final class TextEchoHandler: ChannelInboundHandler, @unchecked Sendable 
         #expect(MockRequest(method: "GET", uri: "/plain").path == "/plain")
         #expect(MockRequest(method: "GET", uri: "/x?y=1?z=2").path == "/x")
     }
+
+    @Test func pathDropsFragmentsAndAbsoluteFormAuthorities() {
+        #expect(MockRequest(method: "GET", uri: "/users#top").path == "/users")
+        #expect(MockRequest(method: "GET", uri: "/users?a=1#top").queryValue("a") == "1")
+        // A fragment ends the target, so anything after it is not a query either.
+        #expect(MockRequest(method: "GET", uri: "/users#f?a=1").queryItems.isEmpty)
+        #expect(MockRequest(method: "GET", uri: "http://127.0.0.1:8080/users/u1?x=1").path == "/users/u1")
+        #expect(MockRequest(method: "GET", uri: "http://127.0.0.1:8080").path == "/")
+        // A colon-slash-slash inside an ordinary path is not a scheme.
+        #expect(MockRequest(method: "GET", uri: "/redirect/http://x/y").path == "/redirect/http://x/y")
+    }
 }

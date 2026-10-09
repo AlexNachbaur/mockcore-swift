@@ -62,21 +62,57 @@ public struct MockWebSocketUpgrade: Sendable {
 }
 
 /// Collects the services registered on a ``MockHost`` in declaration order.
+///
+/// Every statement contributes zero or more services, so conditionals and loops compose:
+///
+/// ```swift
+/// let host = try await MockHost.start {
+///     try await MockRESTEngine(spec: .file("api.yaml"), store: store)
+///     if needsGraphQL {
+///         try await MockQLEngine(schema: .file("shop.graphqls"), store: store)
+///     }
+/// }
+/// ```
 @resultBuilder
 public struct MockServiceBuilder {
-    public static func buildBlock(_ services: any MockService...) -> [any MockService] {
+    /// Lifts one service into the builder's component type.
+    public static func buildExpression(_ service: any MockService) -> [any MockService] {
+        [service]
+    }
+
+    /// Splices an already-assembled list of services in at this position.
+    public static func buildExpression(_ services: [any MockService]) -> [any MockService] {
         services
     }
 
+    /// Concatenates the statements of a block, preserving declaration (= routing precedence)
+    /// order.
+    public static func buildBlock(_ components: [any MockService]...) -> [any MockService] {
+        components.flatMap { $0 }
+    }
+
+    /// Supports `if` without `else`: an untaken branch contributes no services.
     public static func buildOptional(_ services: [any MockService]?) -> [any MockService] {
         services ?? []
     }
 
+    /// Supports the first branch of `if`/`else` and `switch`.
     public static func buildEither(first services: [any MockService]) -> [any MockService] {
         services
     }
 
+    /// Supports the second branch of `if`/`else` and `switch`.
     public static func buildEither(second services: [any MockService]) -> [any MockService] {
+        services
+    }
+
+    /// Supports `for` loops: each iteration's services are appended in iteration order.
+    public static func buildArray(_ components: [[any MockService]]) -> [any MockService] {
+        components.flatMap { $0 }
+    }
+
+    /// Supports `if #available` branches.
+    public static func buildLimitedAvailability(_ services: [any MockService]) -> [any MockService] {
         services
     }
 }

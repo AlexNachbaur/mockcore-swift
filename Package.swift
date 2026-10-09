@@ -35,6 +35,7 @@ let package = Package(
             name: "MockCoreTransport",
             dependencies: [
                 "MockCore",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
@@ -42,6 +43,14 @@ let package = Package(
             ]
         ),
         .testTarget(name: "MockCoreTests", dependencies: ["MockCore"]),
-        .testTarget(name: "MockCoreTransportTests", dependencies: ["MockCoreTransport"]),
+        .testTarget(
+            name: "MockCoreTransportTests",
+            dependencies: [
+                "MockCoreTransport",
+                // Drives the HTTP handler deterministically, without a socket, for the paths a
+                // real client cannot time reliably (a request arriving mid-shutdown).
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+            ]
+        ),
     ]
 )
