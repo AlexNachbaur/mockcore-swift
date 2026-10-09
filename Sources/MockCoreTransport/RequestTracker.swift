@@ -39,24 +39,58 @@ final class RequestTracker: Sendable {
         state.withLockedValue { $0.isAccepting = false }
     }
 
-    /// Waits for every tracked request to finish.
+    /// Whether ``run(_:)`` still accepts work.
+    var isAccepting: Bool {
+        state.withLockedValue { $0.isAccepting }
+    }
+
+    /// Waits for every tracked request to finish, for at most twice `gracePeriod`.
     ///
-    /// Requests still running after `gracePeriod` are cancelled, then awaited: a handler that
-    /// honors cancellation (as `Task.sleep`-based delays do) answers promptly, so its client
-    /// still receives a response rather than a dropped connection.
+    /// Requests still running after `gracePeriod` are cancelled and given a second grace
+    /// period: a handler that honors cancellation (as `Task.sleep`-based delays do) answers
+    /// promptly, so its client still receives a response rather than a dropped connection. A
+    /// handler that ignores cancellation — or that is itself awaiting this host's `stop()` —
+    /// is then abandoned rather than awaited forever; the channel it eventually writes to
+    /// will already be closed.
     func drain(gracePeriod: Duration) async {
         let tasks = state.withLockedValue { Array($0.tasks.values) }
         guard !tasks.isEmpty else { return }
-        let canceller = Task {
-            try await Task.sleep(for: gracePeriod)
-            for task in tasks {
-                task.cancel()
-            }
+        if await Self.allFinished(tasks, within: gracePeriod) {
+            return
         }
         for task in tasks {
-            await task.value
+            task.cancel()
         }
-        canceller.cancel()
+        _ = await Self.allFinished(tasks, within: gracePeriod)
+    }
+
+    /// Whether every task finished before the timeout elapsed.
+    ///
+    /// `await task.value` cannot be cancelled, so the wait is raced against a timer through a
+    /// one-shot continuation; whichever side loses keeps running to completion on its own.
+    private static func allFinished(_ tasks: [Task<Void, Never>], within timeout: Duration) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let resumed = NIOLockedValueBox(false)
+            let finish: @Sendable (Bool) -> Void = { finished in
+                let alreadyResumed = resumed.withLockedValue { resumed in
+                    defer { resumed = true }
+                    return resumed
+                }
+                if !alreadyResumed {
+                    continuation.resume(returning: finished)
+                }
+            }
+            Task {
+                for task in tasks {
+                    await task.value
+                }
+                finish(true)
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                finish(false)
+            }
+        }
     }
 
     private func finish(_ id: UInt64) {

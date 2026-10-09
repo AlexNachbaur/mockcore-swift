@@ -1,5 +1,8 @@
 import Foundation
 import MockCore
+import NIOCore
+import NIOEmbedded
+import NIOHTTP1
 import Testing
 
 @testable import MockCoreTransport
@@ -65,6 +68,43 @@ private struct NamedService: MockService {
 
 private struct ExpectedFailure: Error {}
 
+/// Holds the host a service needs to stop from inside its own handler.
+private actor HostBox {
+    private var host: MockHost?
+
+    func set(_ host: MockHost) {
+        self.host = host
+    }
+
+    func get() -> MockHost? {
+        host
+    }
+}
+
+/// A service that stops its own host from inside a request — an admin "stop the mock"
+/// endpoint — which the drain must not wait on.
+private struct StoppingService: MockService {
+    let name = "Stopping"
+    let log: EventLog
+    let host: HostBox
+
+    func claims(_ request: MockRequest) -> Bool {
+        request.path == "/stop"
+    }
+
+    func respond(to request: MockRequest) async -> MockResponse {
+        if let host = await host.get() {
+            try? await host.stop(gracePeriod: .milliseconds(50))
+            await log.record("stopped")
+        }
+        return .text("stopping")
+    }
+
+    func shutdown() async {
+        await log.record("shutdown")
+    }
+}
+
 @Suite struct HostLifecycleTests {
     private func status(_ path: String, on host: MockHost, method: String = "GET") async throws -> Int {
         var request = URLRequest(url: try #require(URL(string: path, relativeTo: host.url)))
@@ -123,6 +163,61 @@ private struct ExpectedFailure: Error {}
         // Cancellation ends the handler's delay early; the client still gets its response.
         #expect(try await inFlight == 200)
         #expect(await log.events == ["cancelled", "shutdown"])
+    }
+
+    @Test(.timeLimit(.minutes(1))) func stopAwaitedFromInsideAHandlerDoesNotDeadlock() async throws {
+        // The handler's task is in flight for the whole shutdown and can never finish before
+        // `stop` returns — so the drain must give up on it instead of waiting forever.
+        let log = EventLog()
+        let hostBox = HostBox()
+        let service = StoppingService(log: log, host: hostBox)
+        let host = try await MockHost.start(services: [service])
+        await hostBox.set(host)
+
+        // The handler is abandoned by the drain and its connection closes with the host, so
+        // the client sees a dropped connection rather than a response; what matters is that
+        // `stop` returned at all (the time limit above is the real assertion) and in order.
+        let request = Task { try await status("/stop", on: host) }
+        _ = await request.result
+        try await host.stop()
+        #expect(await log.events == ["shutdown", "stopped"])
+    }
+
+    @Test func requestsArrivingAfterShutdownBeganGet503() throws {
+        // Driven through an embedded channel: a real client cannot time a keep-alive request
+        // into the window between `stopAccepting` and the connection closing.
+        let tracker = RequestTracker()
+        let channel = EmbeddedChannel(handler: HostHTTPHandler(services: [NamedService(name: "a")], tracker: tracker))
+        tracker.stopAccepting()
+
+        var head = HTTPRequestHead(version: .http1_1, method: .GET, uri: "/a")
+        head.headers.add(name: "Host", value: "localhost")
+        try channel.writeInbound(HTTPServerRequestPart.head(head))
+        try channel.writeInbound(HTTPServerRequestPart.end(nil))
+
+        let responseHead = try #require(try channel.readOutbound(as: HTTPServerResponsePart.self))
+        guard case .head(let written) = responseHead else {
+            Issue.record("Expected a response head, got \(responseHead)")
+            return
+        }
+        #expect(written.status == .serviceUnavailable)
+        #expect(written.headers["Connection"] == ["close"])
+        // `Connection: close` is honored: the handler closed the channel after the response.
+        #expect(!channel.isActive)
+    }
+
+    @Test func withRunningReturnsANonSendableValueToItsCaller() async throws {
+        // `body` runs and returns on the caller's actor, so nothing has to cross an isolation
+        // boundary — a result the caller already holds must be allowed back.
+        final class Held {
+            var touched = false
+        }
+        let held = Held()
+        let returned = try await MockHost.withRunning(services: [NamedService(name: "a")]) { _ in
+            held.touched = true
+            return held
+        }
+        #expect(returned.touched)
     }
 
     @Test func withRunningStopsTheHostWhenTheBodyThrows() async throws {

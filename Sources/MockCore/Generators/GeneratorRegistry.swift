@@ -112,7 +112,7 @@ public struct GeneratorRegistry: Sendable {
             if name.containsAny(of: ["username", "handle"]) { return .username }
             if name.containsAny(of: ["firstname", "givenname"]) { return .firstName }
             if name.containsAny(of: ["lastname", "surname", "familyname"]) { return .lastName }
-            if name.containsAny(of: ["name"]) { return .fullName }
+            if name.containsAny(of: ["name", "nickname"]) { return .fullName }
             if name.isDateLike { return .dateTime }
             return .sentence
         default:
@@ -151,10 +151,15 @@ struct FieldNameWords {
                 continue
             }
             if character.isUppercase, let previous = current.last {
-                let nextIsLowercase = index + 1 < characters.count && characters[index + 1].isLowercase
+                let next = index + 1 < characters.count ? characters[index + 1] : nil
+                let afterNext = index + 2 < characters.count ? characters[index + 2] : nil
+                // A plural `s` on an acronym (`URLs`, `imageURLs`) belongs to the acronym, so it
+                // must not be read as the start of a new word.
+                let nextIsPlural = next == "s" && !(afterNext?.isLowercase ?? false)
+                let nextStartsWord = (next?.isLowercase ?? false) && !nextIsPlural
                 // A hump starts a word (`created|At`), and so does the last capital of an
                 // acronym run when a lowercase letter follows it (`HTML|Body`).
-                if previous.isLowercase || (previous.isUppercase && nextIsLowercase) {
+                if previous.isLowercase || (previous.isUppercase && nextStartsWord) {
                     words.append(current)
                     current = ""
                 }
@@ -169,15 +174,17 @@ struct FieldNameWords {
 
     /// Whether any of `terms` appears as a word, or as adjacent words that spell it — so
     /// `"username"` matches both `username` and `userName`, but `"name"` does not match
-    /// `filename`.
+    /// `filename`. A plural matches its singular term (`emails`, `avatarURLs`), since list
+    /// fields are routinely named that way.
     func containsAny(of terms: [String]) -> Bool {
         terms.contains { term in
+            let plural = term + "s"
             for start in words.indices {
                 var joined = ""
                 for word in words[start...] {
                     joined += word
-                    if joined == term { return true }
-                    if joined.count >= term.count { break }
+                    if joined == term || joined == plural { return true }
+                    if joined.count >= plural.count { break }
                 }
             }
             return false

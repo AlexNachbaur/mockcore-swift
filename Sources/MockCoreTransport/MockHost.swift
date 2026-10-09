@@ -139,8 +139,8 @@ public final class MockHost: Sendable {
         port: Int = 0,
         services: [any MockService],
         isolation: isolated (any Actor)? = #isolation,
-        _ body: (MockHost) async throws -> sending Result
-    ) async throws -> sending Result {
+        _ body: (MockHost) async throws -> Result
+    ) async throws -> Result {
         let running = try await start(host: host, port: port, services: services)
         let result: Result
         do {
@@ -182,7 +182,9 @@ public final class MockHost: Sendable {
             maxFrameSize: 1 << 20,
             shouldUpgrade: { channel, head in
                 let request = MockRequest(head: head)
-                guard let upgrade = Self.webSocketUpgrade(for: request, in: services) else {
+                // Once the host is stopping, an upgrade would hand a socket to a service that is
+                // about to be shut down; declining it lets the HTTP path answer 503 instead.
+                guard tracker.isAccepting, let upgrade = Self.webSocketUpgrade(for: request, in: services) else {
                     return channel.eventLoop.makeSucceededFuture(nil)
                 }
                 var headers = HTTPHeaders()
@@ -261,10 +263,13 @@ public final class MockHost: Sendable {
     /// handled are then given `gracePeriod` to answer before they are cancelled.
     ///
     /// Safe to call more than once and from several tasks: every call awaits the same shutdown
-    /// and reports the same outcome.
+    /// and reports the same outcome — including a call made from inside a request handler,
+    /// which is abandoned by the drain rather than awaited (see below) and resumes once the
+    /// host has stopped.
     ///
     /// - Parameter gracePeriod: How long in-flight requests may keep running before they are
-    ///   cancelled. A handler that ignores cancellation delays `stop` until it returns.
+    ///   cancelled, and then how long a cancelled request may take to wind down before it is
+    ///   abandoned. `stop` therefore takes at most twice this on a misbehaving handler.
     public func stop(gracePeriod: Duration = .seconds(2)) async throws {
         let task = shutdown.withLockedValue { existing in
             if let existing {

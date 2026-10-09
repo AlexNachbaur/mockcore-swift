@@ -106,6 +106,22 @@ import Testing
         }
     }
 
+    @Test func pluralsAndAcronymPluralsKeepTheirShape() {
+        // Names that inferred correctly before word matching, and must still.
+        #expect(inferredKind("emails") == "email")
+        #expect(inferredKind("urls") == "url")
+        #expect(inferredKind("links") == "url")
+        #expect(inferredKind("imageURLs") == "url")
+        #expect(inferredKind("URLs") == "url")
+        #expect(inferredKind("emailAddress") == "email")
+        #expect(inferredKind("avatar_url") == "url")
+        #expect(inferredKind("birthDate") == "dateTime")
+        #expect(FieldNameWords("imageURLs").words == ["image", "urls"])
+        #expect(FieldNameWords("URLs").words == ["urls"])
+        #expect(FieldNameWords("names").containsAny(of: ["name"]))
+        #expect(FieldNameWords("nickname").containsAny(of: ["nickname"]))
+    }
+
     @Test func fieldNamesSplitIntoWords() {
         #expect(FieldNameWords("createdAt").words == ["created", "at"])
         #expect(FieldNameWords("created_at").words == ["created", "at"])

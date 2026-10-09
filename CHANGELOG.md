@@ -51,8 +51,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `lifetime` were generated as timestamps, `hourly` and `blinking` as URLs, and `title` and
   `filename` as people's names. Names are now split at camelCase humps, underscores, hyphens,
   and digits, and a rule fires only on a word match (`createdAt`, `created_at`, `avatarURL`).
-  `title` is no longer treated as a person's name. **Generated values for fields that only
+  `title` is no longer treated as a person's name. Plurals match their singular (`emails`,
+  `avatarURLs`), and `nickname` still reads as a name. **Generated values for fields that only
   matched by substring will differ from 0.1.2**; bind a generator explicitly to pin a shape.
+- `MockHost.stop(gracePeriod:)` never waits forever: a handler that ignores cancellation — or
+  that is itself awaiting `stop()` — is abandoned after a second grace period instead of
+  deadlocking the shutdown. A WebSocket upgrade arriving once shutdown has begun is declined
+  (the HTTP path answers 503), so no socket is handed to a service about to be shut down.
 - `MockError` conforms to `LocalizedError`, so `localizedDescription` — what XCTest failures
   and most logging print — is the full diagnostic instead of "The operation couldn't be
   completed".
@@ -67,8 +72,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `snapshot()` after the transaction, and a concurrent mutation from any service sharing the
   store could land in between — so the payload could describe state the mutation never saw.
   `withMutationState(_:)` is now implemented on top of it and is unchanged for callers.
-- `MockHost.withRunning(host:port:services:_:)` — starts a host, runs a body, and stops the
-  host on every exit path. A test that throws past a trailing `stop()` otherwise leaks the port
+- `MockHost.withRunning(host:port:services:isolation:_:)` — starts a host, runs a body, and
+  stops the host on every exit path. A test that throws past a trailing `stop()` otherwise leaks the port
   and its event-loop thread for the rest of the process.
 - `MockHost.stop(gracePeriod:)` — how long in-flight requests may run before being cancelled
   (default 2 seconds).

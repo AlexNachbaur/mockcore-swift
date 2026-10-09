@@ -52,8 +52,11 @@ public struct MockRequest: Sendable {
     /// through raw), so one malformed parameter never disables decoding for the others — unlike
     /// whole-URI parsers, whose strictness also varies across Foundation versions.
     public var queryItems: [(name: String, value: String)] {
-        guard let queryStart = uri.firstIndex(of: "?") else { return [] }
-        let query = uri[uri.index(after: queryStart)...].prefix(while: { $0 != "#" })
+        // A fragment never reaches a server in practice, but if one does it ends the target:
+        // `/x#f?y=1` has no query at all.
+        let target = uri.prefix(while: { $0 != "#" })
+        guard let queryStart = target.firstIndex(of: "?") else { return [] }
+        let query = target[target.index(after: queryStart)...]
         return query.split(separator: "&").map { pair in
             let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             let rawName = String(parts.first ?? "")
