@@ -51,13 +51,29 @@ public actor StateStore {
 
     /// Runs a transactional mutation. Writes are committed only when `body` returns without
     /// throwing.
+    @discardableResult
     public func withMutationState<T: Sendable>(
         _ body: @Sendable (inout MutationState) throws -> T
     ) rethrows -> T {
+        try transaction(body).result
+    }
+
+    /// Runs a transactional mutation and also returns the state it committed.
+    ///
+    /// The snapshot is exactly what `body`'s writes produced, taken before the actor yields —
+    /// so a protocol extension that must resolve a mutation's payload against the state *that
+    /// mutation* left (a GraphQL mutation selection, a REST `201` body) can do so without a
+    /// second `snapshot()` call, during which a concurrent mutation from any service sharing
+    /// the store could have interleaved.
+    ///
+    /// Writes are committed only when `body` returns without throwing.
+    public func transaction<T: Sendable>(
+        _ body: @Sendable (inout MutationState) throws -> T
+    ) rethrows -> (result: T, committed: StoreData) {
         var state = MutationState(data: data)
         let result = try body(&state)
         data = state.data
-        return result
+        return (result, data)
     }
 
     // MARK: - Convenience accessors
