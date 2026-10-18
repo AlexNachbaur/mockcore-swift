@@ -17,8 +17,8 @@ no knowledge of any particular schema language?*
 
 ## Getting started
 
-1. Install a **Swift 6.1** toolchain — Xcode 16.4+ on macOS, a [swift.org](https://swift.org/install/)
-   toolchain on Linux or Windows, or the `swift:6.1` Docker image (which is what CI uses).
+1. Install a **Swift 6.3** toolchain — Xcode 26.5+ on macOS, a [swift.org](https://swift.org/install/)
+   toolchain on Linux or Windows, or the `swift:6.3` Docker image (which is what CI uses).
 2. Fork and clone the repository.
 3. Build and test from the command line:
 
@@ -27,7 +27,7 @@ no knowledge of any particular schema language?*
    swift test
    ```
 
-   On macOS you can also open `Package.swift` in Xcode 16.4 or later.
+   On macOS you can also open `Package.swift` in Xcode 26.5 or later.
 
 Dependencies are Yams (in `MockCore`) and SwiftNIO (in `MockCoreTransport` only — `MockCore`
 must stay NIO-free and portable).
@@ -59,10 +59,10 @@ Beyond formatting, the project follows these rules:
 - **Error messages are a product feature.** Every user-facing error carries a source name,
   location, or document path, and a "did you mean" suggestion where a typo is plausible. Never
   regress diagnostic quality.
-- **Stay cross-platform.** `MockCore` supports macOS, iOS, Linux, and Android (with Windows
-  planned). Don't import Apple-only frameworks, and stick to Foundation APIs available in
-  swift-corelibs-foundation. CI builds and tests on macOS, Linux, and an Android emulator, and
-  must pass on all three.
+- **Stay cross-platform.** `MockCore` supports macOS, iOS, Linux, Windows, and Android. Don't
+  import Apple-only frameworks, and stick to Foundation APIs available in
+  swift-corelibs-foundation. CI builds and tests on macOS, an iOS simulator, Linux, Windows,
+  and an Android emulator, and must pass on all five.
 
 ## Compatibility responsibilities
 

@@ -5,7 +5,7 @@
 > (GraphQL via MockQL, REST via MockREST, or your own), which share one transactional
 > in-memory `StateStore` and one deterministic data-generation system.
 
-Swift 6.1+, SPM package with two libraries: `MockCore` (portable, NIO-free: MockValue,
+Swift 6.3+, SPM package with two libraries: `MockCore` (portable, NIO-free: MockValue,
 StateStore, generators, seed primitives, diagnostics) and `MockCoreTransport` (SwiftNIO
 MockHost + MockService seam). Test-time tool only. Most apps should depend on a protocol
 extension, not on this package directly.
