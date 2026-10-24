@@ -19,47 +19,89 @@ public struct YAMLDecoding {
         sourceName: String?,
         category: MockError.Category = .seed
     ) throws -> MockValue {
+        let context = Context(sourceName: sourceName, category: category)
         let root: Node?
         do {
             root = try Yams.compose(yaml: text)
         } catch let error as YamlError {
-            let kind = category == .seed ? "Seed document" : "Document"
+            let failure = describe(error)
             throw MockError(
                 category: category,
-                message: "\(kind) is not valid YAML: \(error)",
-                sourceName: sourceName
+                message: "\(context.documentKind) is not valid YAML: \(failure.detail)",
+                sourceName: sourceName,
+                location: failure.location
             )
         }
         guard let root else {
             return .object([:])
         }
-        return try value(from: root, sourceName: sourceName)
+        return try value(from: root, context: context)
     }
 
-    private static func value(from node: Node, sourceName: String?) throws -> MockValue {
+    /// What a diagnostic needs to know about the document being decoded.
+    private struct Context {
+        let sourceName: String?
+        let category: MockError.Category
+
+        /// How the document is named in a message: only a seed is called a seed, so a
+        /// malformed OpenAPI spec is never reported as a seed problem.
+        var documentKind: String {
+            category == .seed ? "Seed document" : "Document"
+        }
+    }
+
+    /// Splits a Yams failure into a structured location and the explanation that goes with it.
+    ///
+    /// Yams' own description leads with `line:column: error: parser:`; the position belongs in
+    /// ``MockError/location`` — where it prints once, next to the source name, and where tools
+    /// can read it — so the text here is rebuilt from the parts without it. The offending line
+    /// and caret are kept: they are the most useful part of the message.
+    private static func describe(_ error: YamlError) -> (detail: String, location: SourceLocation?) {
+        switch error {
+        case .scanner(let context, let problem, let mark, let yaml),
+            .parser(let context, let problem, let mark, let yaml),
+            .composer(let context, let problem, let mark, let yaml):
+            var detail = problem
+            if let context {
+                detail += " \(context.text) (line \(context.mark.line), column \(context.mark.column))"
+            }
+            detail += ":\n" + mark.snippet(from: yaml)
+            return (detail, SourceLocation(line: mark.line, column: mark.column))
+        default:
+            return ("\(error)", nil)
+        }
+    }
+
+    private static func location(of node: Node) -> SourceLocation? {
+        node.mark.map { SourceLocation(line: $0.line, column: $0.column) }
+    }
+
+    private static func value(from node: Node, context: Context) throws -> MockValue {
         switch node {
         case .scalar(let scalar):
             return scalarValue(scalar)
         case .sequence(let sequence):
-            return .list(try sequence.map { try value(from: $0, sourceName: sourceName) })
+            return .list(try sequence.map { try value(from: $0, context: context) })
         case .mapping(let mapping):
             var fields: [String: MockValue] = [:]
             for (keyNode, valueNode) in mapping {
                 guard let key = keyNode.string else {
                     throw MockError(
-                        category: .seed,
-                        message: "Seed mapping keys must be strings",
-                        sourceName: sourceName
+                        category: context.category,
+                        message: "\(context.documentKind) mapping keys must be strings",
+                        sourceName: context.sourceName,
+                        location: location(of: keyNode)
                     )
                 }
-                fields[key] = try value(from: valueNode, sourceName: sourceName)
+                fields[key] = try value(from: valueNode, context: context)
             }
             return .object(fields)
         default:
             throw MockError(
-                category: .seed,
-                message: "Unsupported YAML construct in seed document",
-                sourceName: sourceName
+                category: context.category,
+                message: "Unsupported YAML construct in \(context.documentKind.lowercased())",
+                sourceName: context.sourceName,
+                location: location(of: node)
             )
         }
     }

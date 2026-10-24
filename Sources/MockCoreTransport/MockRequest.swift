@@ -10,7 +10,9 @@ public struct MockRequest: Sendable {
     public let method: String
     /// The request URI exactly as sent, including any query string.
     public let uri: String
-    /// The path component of the URI, without the query string.
+    /// The path component of the URI: no query string, no fragment, and — for an absolute-form
+    /// request target (`GET http://host/path`, as a proxy-configured client sends) — no scheme
+    /// or authority.
     public let path: String
     /// All request headers, in wire order. Use ``header(_:)`` for case-insensitive lookup.
     public let headers: [(name: String, value: String)]
@@ -21,9 +23,22 @@ public struct MockRequest: Sendable {
     public init(method: String, uri: String, headers: [(name: String, value: String)] = [], body: Data = Data()) {
         self.method = method.uppercased()
         self.uri = uri
-        self.path = String(uri.prefix(while: { $0 != "?" }))
+        self.path = Self.path(of: uri)
         self.headers = headers
         self.body = body
+    }
+
+    private static func path(of uri: String) -> String {
+        var target = uri.prefix(while: { $0 != "?" && $0 != "#" })
+        // Absolute-form (RFC 9112 §3.2.2): drop `scheme://authority`, keeping the path.
+        if let schemeEnd = target.range(of: "://"), !target.hasPrefix("/") {
+            let afterAuthority = target[schemeEnd.upperBound...]
+            target = afterAuthority.drop(while: { $0 != "/" })
+            if target.isEmpty {
+                return "/"
+            }
+        }
+        return String(target)
     }
 
     /// The first value of the named header, matched case-insensitively.
@@ -37,8 +52,11 @@ public struct MockRequest: Sendable {
     /// through raw), so one malformed parameter never disables decoding for the others — unlike
     /// whole-URI parsers, whose strictness also varies across Foundation versions.
     public var queryItems: [(name: String, value: String)] {
-        guard let queryStart = uri.firstIndex(of: "?") else { return [] }
-        let query = uri[uri.index(after: queryStart)...]
+        // A fragment never reaches a server in practice, but if one does it ends the target:
+        // `/x#f?y=1` has no query at all.
+        let target = uri.prefix(while: { $0 != "#" })
+        guard let queryStart = target.firstIndex(of: "?") else { return [] }
+        let query = target[target.index(after: queryStart)...]
         return query.split(separator: "&").map { pair in
             let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             let rawName = String(parts.first ?? "")
