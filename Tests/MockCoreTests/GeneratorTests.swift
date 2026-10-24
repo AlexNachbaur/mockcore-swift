@@ -143,6 +143,18 @@ import Testing
         #expect(try #require(createdAt.stringValue).hasSuffix("Z"))
     }
 
+    /// A custom scalar's type name is an explicit declaration, so it reads as a date by
+    /// substring (Postgres/Hasura's one-word `timestamptz` and `timetz` included), unlike field
+    /// names, which match whole words.
+    @Test func dateLikeCustomScalarTypesGetTimestamps() throws {
+        for scalar in ["DateTime", "Date", "timestamptz", "timetz", "Timestamp", "ISO8601DateTime"] {
+            let value = registryValue(field: "lastSeen", scalarTypeName: scalar)
+            #expect(try #require(value.stringValue).hasSuffix("Z"), "\(scalar) should generate a timestamp")
+        }
+        let opaque = try #require(registryValue(field: "token", scalarTypeName: "JSON").stringValue)
+        #expect(!opaque.hasSuffix("Z"))
+    }
+
     private func registryValue(field: String, scalarTypeName: String) -> MockValue {
         GeneratorRegistry(serverSeed: 5).value(
             typeName: "User",

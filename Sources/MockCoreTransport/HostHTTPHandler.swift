@@ -16,11 +16,13 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
     typealias OutboundOut = HTTPServerResponsePart
 
     private let services: [any MockService]
+    private let tracker: RequestTracker
     private var requestHead: HTTPRequestHead?
     private var bodyBuffer: ByteBuffer?
 
-    init(services: [any MockService]) {
+    init(services: [any MockService], tracker: RequestTracker) {
         self.services = services
+        self.tracker = tracker
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -44,6 +46,11 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
         let version: HTTPVersion
         let keepAlive: Bool
         let isHEAD: Bool
+
+        /// The same context, but closing the connection once the response is written.
+        var closingConnection: ResponseContext {
+            ResponseContext(version: version, keepAlive: false, isHEAD: isHEAD)
+        }
     }
 
     private func route(head: HTTPRequestHead, body: ByteBuffer?, channel: Channel) {
@@ -59,7 +66,9 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
             body: body.map { Data($0.readableBytesView) } ?? Data()
         )
         guard let service = services.first(where: { $0.claims(request) }) else {
-            if request.method == "GET", request.path == "/health" {
+            // HEAD is answered too: readiness probes commonly use it, and `send` already
+            // suppresses the body for HEAD.
+            if request.method == "GET" || request.method == "HEAD", request.path == "/health" {
                 Self.send(MockResponse.text("ok"), response: responseContext, channel: channel)
                 return
             }
@@ -67,11 +76,23 @@ final class HostHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @un
             Self.send(notFound, response: responseContext, channel: channel)
             return
         }
-        Task {
+        let accepted = tracker.run {
             let response = await service.respond(to: request)
             Self.send(response, response: responseContext, channel: channel)
         }
+        if !accepted {
+            // The host is stopping and its services are about to be (or already are) shut
+            // down. Answer here rather than hand a request to a service past its `shutdown()`.
+            Self.send(Self.stoppingResponse, response: responseContext.closingConnection, channel: channel)
+        }
     }
+
+    /// The 503 for a request that arrives on an open connection after the host began stopping.
+    private static let stoppingResponse = MockResponse(
+        status: 503,
+        headers: [("Content-Type", "text/plain")],
+        body: Data("The mock host is stopping".utf8)
+    )
 
     /// The 404 for a request no service claims: names what is registered so a typo'd path is
     /// diagnosable from the response alone.
