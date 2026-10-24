@@ -54,6 +54,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `title` is no longer treated as a person's name. Plurals match their singular (`emails`,
   `avatarURLs`), and `nickname` still reads as a name. **Generated values for fields that only
   matched by substring will differ from 0.1.2**; bind a generator explicitly to pin a shape.
+  A custom scalar's *type* name still reads as a date by substring, as before: it is an
+  explicit declaration, and `timestamptz` and `timetz` are single words.
 - `MockHost.stop(gracePeriod:)` never waits forever: a handler that ignores cancellation — or
   that is itself awaiting `stop()` — is abandoned after a second grace period instead of
   deadlocking the shutdown. A WebSocket upgrade arriving once shutdown has begun is declined

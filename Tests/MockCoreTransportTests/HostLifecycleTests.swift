@@ -87,6 +87,8 @@ private struct StoppingService: MockService {
     let name = "Stopping"
     let log: EventLog
     let host: HostBox
+    /// Yields once the handler's `stop` has returned and been recorded.
+    let finished: AsyncStream<Void>.Continuation
 
     func claims(_ request: MockRequest) -> Bool {
         request.path == "/stop"
@@ -97,6 +99,7 @@ private struct StoppingService: MockService {
             try? await host.stop(gracePeriod: .milliseconds(50))
             await log.record("stopped")
         }
+        finished.yield()
         return .text("stopping")
     }
 
@@ -170,7 +173,8 @@ private struct StoppingService: MockService {
         // `stop` returns — so the drain must give up on it instead of waiting forever.
         let log = EventLog()
         let hostBox = HostBox()
-        let service = StoppingService(log: log, host: hostBox)
+        let (finished, continuation) = AsyncStream.makeStream(of: Void.self)
+        let service = StoppingService(log: log, host: hostBox, finished: continuation)
         let host = try await MockHost.start(services: [service])
         await hostBox.set(host)
 
@@ -180,6 +184,9 @@ private struct StoppingService: MockService {
         let request = Task { try await status("/stop", on: host) }
         _ = await request.result
         try await host.stop()
+        // The abandoned handler resumes on its own schedule, so the client's dropped connection
+        // says nothing about whether it has recorded yet: wait for it rather than race it.
+        for await _ in finished { break }
         #expect(await log.events == ["shutdown", "stopped"])
     }
 

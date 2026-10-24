@@ -117,7 +117,10 @@ public struct GeneratorRegistry: Sendable {
             return .sentence
         default:
             // Custom scalars: date-like names get timestamps; anything else gets an opaque string.
-            if name.isDateLike || FieldNameWords(scalarTypeName).isDateLike {
+            // The scalar's type name is an explicit declaration, not a field name, so it matches
+            // by substring: Postgres/Hasura's one-word `timestamptz` and `timetz` are dates.
+            let scalar = scalarTypeName.lowercased()
+            if name.isDateLike || scalar.contains("date") || scalar.contains("time") {
                 return .dateTime
             }
             return .custom(scalarTypeName: scalarTypeName) { context in
